@@ -104,33 +104,33 @@ htfOHLC() =>
 // For each HTF, compute: scenario string, bullish/bearish, whether current price is above its open
 // Yearly
 string y_scen   = htfEnable1 and not na(y_pH) ? getScenarioStr(y_h, y_l, y_pH, y_pL) : na
-bool   y_bull   = htfEnable1 and not na(y_c) ? y_c > y_o : na
-bool   y_above  = htfEnable1 and not na(y_o) ? close > y_o : na
+bool   y_bull   = htfEnable1 and not na(y_c) ? y_c > y_o : bool(na)
+bool   y_above  = htfEnable1 and not na(y_o) ? close > y_o : bool(na)
 
 // Quarterly
 string q_scen   = htfEnable2 and not na(q_pH) ? getScenarioStr(q_h, q_l, q_pH, q_pL) : na
-bool   q_bull   = htfEnable2 and not na(q_c) ? q_c > q_o : na
-bool   q_above  = htfEnable2 and not na(q_o) ? close > q_o : na
+bool   q_bull   = htfEnable2 and not na(q_c) ? q_c > q_o : bool(na)
+bool   q_above  = htfEnable2 and not na(q_o) ? close > q_o : bool(na)
 
 // Monthly
 string m_scen   = htfEnable3 and not na(m_pH) ? getScenarioStr(m_h, m_l, m_pH, m_pL) : na
-bool   m_bull   = htfEnable3 and not na(m_c) ? m_c > m_o : na
-bool   m_above  = htfEnable3 and not na(m_o) ? close > m_o : na
+bool   m_bull   = htfEnable3 and not na(m_c) ? m_c > m_o : bool(na)
+bool   m_above  = htfEnable3 and not na(m_o) ? close > m_o : bool(na)
 
 // Weekly
 string w_scen   = htfEnable4 and not na(w_pH) ? getScenarioStr(w_h, w_l, w_pH, w_pL) : na
-bool   w_bull   = htfEnable4 and not na(w_c) ? w_c > w_o : na
-bool   w_above  = htfEnable4 and not na(w_o) ? close > w_o : na
+bool   w_bull   = htfEnable4 and not na(w_c) ? w_c > w_o : bool(na)
+bool   w_above  = htfEnable4 and not na(w_o) ? close > w_o : bool(na)
 
 // Daily
 string d_scen   = htfEnable5 and not na(d_pH) ? getScenarioStr(d_h, d_l, d_pH, d_pL) : na
-bool   d_bull   = htfEnable5 and not na(d_c) ? d_c > d_o : na
-bool   d_above  = htfEnable5 and not na(d_o) ? close > d_o : na
+bool   d_bull   = htfEnable5 and not na(d_c) ? d_c > d_o : bool(na)
+bool   d_above  = htfEnable5 and not na(d_o) ? close > d_o : bool(na)
 
 // 60 Minute
 string h_scen   = htfEnable6 and not na(h_pH) ? getScenarioStr(h_h, h_l, h_pH, h_pL) : na
-bool   h_bull   = htfEnable6 and not na(h_c) ? h_c > h_o : na
-bool   h_above  = htfEnable6 and not na(h_o) ? close > h_o : na
+bool   h_bull   = htfEnable6 and not na(h_c) ? h_c > h_o : bool(na)
+bool   h_above  = htfEnable6 and not na(h_o) ? close > h_o : bool(na)
 
 // ============================================================================
 // SECTION 5: TIMEFRAME CONTINUITY (TFC / FTFC)
@@ -320,10 +320,9 @@ if (buySignal or sellSignal) and showSetupLabels
     string lblTxt  = comboName + " [" + activeGrade + "]"
     color  lblClr  = buySignal ? colorSignalBuy : colorSignalSell
     float  lblY    = buySignal ? low - ta.atr(14) * 0.7 : high + ta.atr(14) * 0.7
-    label.style lblStyle = buySignal ? label.style_label_up : label.style_label_down
     label.new(bar_index, lblY, lblTxt,
               color=color.new(lblClr, 80), textcolor=lblClr,
-              style=lblStyle, size=size.small)
+              style=buySignal ? label.style_label_up : label.style_label_down, size=size.small)
 
 // ============================================================================
 // SECTION 9: RISK LEVEL VISUALIZATION
