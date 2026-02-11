@@ -102,35 +102,43 @@ htfOHLC() =>
 // ============================================================================
 
 // For each HTF, compute: scenario string, bullish/bearish, whether current price is above its open
+// Validity flags use float na() checks (na() does not accept bool in v6)
+bool y_valid = htfEnable1 and not na(y_o)
+bool q_valid = htfEnable2 and not na(q_o)
+bool m_valid = htfEnable3 and not na(m_o)
+bool w_valid = htfEnable4 and not na(w_o)
+bool d_valid = htfEnable5 and not na(d_o)
+bool h_valid = htfEnable6 and not na(h_o)
+
 // Yearly
-string y_scen   = htfEnable1 and not na(y_pH) ? getScenarioStr(y_h, y_l, y_pH, y_pL) : na
-bool   y_bull   = htfEnable1 and not na(y_c) ? y_c > y_o : bool(na)
-bool   y_above  = htfEnable1 and not na(y_o) ? close > y_o : bool(na)
+string y_scen   = y_valid and not na(y_pH) ? getScenarioStr(y_h, y_l, y_pH, y_pL) : na
+bool   y_bull   = y_valid ? y_c > y_o : false
+bool   y_above  = y_valid ? close > y_o : false
 
 // Quarterly
-string q_scen   = htfEnable2 and not na(q_pH) ? getScenarioStr(q_h, q_l, q_pH, q_pL) : na
-bool   q_bull   = htfEnable2 and not na(q_c) ? q_c > q_o : bool(na)
-bool   q_above  = htfEnable2 and not na(q_o) ? close > q_o : bool(na)
+string q_scen   = q_valid and not na(q_pH) ? getScenarioStr(q_h, q_l, q_pH, q_pL) : na
+bool   q_bull   = q_valid ? q_c > q_o : false
+bool   q_above  = q_valid ? close > q_o : false
 
 // Monthly
-string m_scen   = htfEnable3 and not na(m_pH) ? getScenarioStr(m_h, m_l, m_pH, m_pL) : na
-bool   m_bull   = htfEnable3 and not na(m_c) ? m_c > m_o : bool(na)
-bool   m_above  = htfEnable3 and not na(m_o) ? close > m_o : bool(na)
+string m_scen   = m_valid and not na(m_pH) ? getScenarioStr(m_h, m_l, m_pH, m_pL) : na
+bool   m_bull   = m_valid ? m_c > m_o : false
+bool   m_above  = m_valid ? close > m_o : false
 
 // Weekly
-string w_scen   = htfEnable4 and not na(w_pH) ? getScenarioStr(w_h, w_l, w_pH, w_pL) : na
-bool   w_bull   = htfEnable4 and not na(w_c) ? w_c > w_o : bool(na)
-bool   w_above  = htfEnable4 and not na(w_o) ? close > w_o : bool(na)
+string w_scen   = w_valid and not na(w_pH) ? getScenarioStr(w_h, w_l, w_pH, w_pL) : na
+bool   w_bull   = w_valid ? w_c > w_o : false
+bool   w_above  = w_valid ? close > w_o : false
 
 // Daily
-string d_scen   = htfEnable5 and not na(d_pH) ? getScenarioStr(d_h, d_l, d_pH, d_pL) : na
-bool   d_bull   = htfEnable5 and not na(d_c) ? d_c > d_o : bool(na)
-bool   d_above  = htfEnable5 and not na(d_o) ? close > d_o : bool(na)
+string d_scen   = d_valid and not na(d_pH) ? getScenarioStr(d_h, d_l, d_pH, d_pL) : na
+bool   d_bull   = d_valid ? d_c > d_o : false
+bool   d_above  = d_valid ? close > d_o : false
 
 // 60 Minute
-string h_scen   = htfEnable6 and not na(h_pH) ? getScenarioStr(h_h, h_l, h_pH, h_pL) : na
-bool   h_bull   = htfEnable6 and not na(h_c) ? h_c > h_o : bool(na)
-bool   h_above  = htfEnable6 and not na(h_o) ? close > h_o : bool(na)
+string h_scen   = h_valid and not na(h_pH) ? getScenarioStr(h_h, h_l, h_pH, h_pL) : na
+bool   h_bull   = h_valid ? h_c > h_o : false
+bool   h_above  = h_valid ? close > h_o : false
 
 // ============================================================================
 // SECTION 5: TIMEFRAME CONTINUITY (TFC / FTFC)
@@ -141,42 +149,42 @@ int bullCount = 0
 int bearCount = 0
 int tfTotal   = 0
 
-if htfEnable1 and not na(y_above)
+if y_valid
     tfTotal += 1
     if y_above
         bullCount += 1
     else
         bearCount += 1
 
-if htfEnable2 and not na(q_above)
+if q_valid
     tfTotal += 1
     if q_above
         bullCount += 1
     else
         bearCount += 1
 
-if htfEnable3 and not na(m_above)
+if m_valid
     tfTotal += 1
     if m_above
         bullCount += 1
     else
         bearCount += 1
 
-if htfEnable4 and not na(w_above)
+if w_valid
     tfTotal += 1
     if w_above
         bullCount += 1
     else
         bearCount += 1
 
-if htfEnable5 and not na(d_above)
+if d_valid
     tfTotal += 1
     if d_above
         bullCount += 1
     else
         bearCount += 1
 
-if htfEnable6 and not na(h_above)
+if h_valid
     tfTotal += 1
     if h_above
         bullCount += 1
@@ -519,17 +527,12 @@ if showHTFTable
                                               na(m_scen) ? "-" : m_scen, na(w_scen) ? "-" : w_scen,
                                               na(d_scen) ? "-" : d_scen, na(h_scen) ? "-" : h_scen)
 
-        array<bool>   tfBulls    = array.from(na(y_bull) ? false : y_bull, na(q_bull) ? false : q_bull,
-                                              na(m_bull) ? false : m_bull, na(w_bull) ? false : w_bull,
-                                              na(d_bull) ? false : d_bull, na(h_bull) ? false : h_bull)
+        array<bool>   tfBulls    = array.from(y_bull, q_bull, m_bull, w_bull, d_bull, h_bull)
 
-        array<bool>   tfAbove    = array.from(na(y_above) ? false : y_above, na(q_above) ? false : q_above,
-                                              na(m_above) ? false : m_above, na(w_above) ? false : w_above,
-                                              na(d_above) ? false : d_above, na(h_above) ? false : h_above)
+        array<bool>   tfAbove    = array.from(y_above, q_above, m_above, w_above, d_above, h_above)
 
         array<float>  tfOpens    = array.from(nz(y_o), nz(q_o), nz(m_o), nz(w_o), nz(d_o), nz(h_o))
-        array<bool>   tfDataOk   = array.from(not na(y_scen), not na(q_scen), not na(m_scen),
-                                              not na(w_scen), not na(d_scen), not na(h_scen))
+        array<bool>   tfDataOk   = array.from(y_valid, q_valid, m_valid, w_valid, d_valid, h_valid)
 
         for i = 0 to 5
             int row = i + 1
