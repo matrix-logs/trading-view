@@ -280,10 +280,8 @@ bool is2u_1_2u = prevScen2 == "2u" and prevScenNum1 == 1 and currScen == "2u"  /
 bool is2d_1_2d = prevScen2 == "2d" and prevScenNum1 == 1 and currScen == "2d"  // bearish cont
 
 // === Composite flags ===
-bool anyBullSetup = insideBreakLong or currFail2D or is2d_2u or is3_2u or
-                    is2_1_2u or is3_1_2u or is1_3u or is3_2d_2u or is2u_1_2u
-bool anyBearSetup = insideBreakShort or currFail2U or is2u_2d or is3_2d or
-                    is2_1_2d or is3_1_2d or is1_3d or is3_2u_2d or is2d_1_2d
+bool anyBullSetup = insideBreakLong or currFail2D or is2d_2u or is3_2u or is2_1_2u or is3_1_2u or is1_3u or is3_2d_2u or is2u_1_2u
+bool anyBearSetup = insideBreakShort or currFail2U or is2u_2d or is3_2d or is2_1_2d or is3_1_2d or is1_3d or is3_2u_2d or is2d_1_2d
 
 // Build combo name string
 string comboName = is2_1_2u   ? "2-1-2U"   : is2_1_2d   ? "2-1-2D"   :
