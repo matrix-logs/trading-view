@@ -322,10 +322,11 @@ plotshape(sellSignal and showBuySell, title="SELL", location=location.abovebar,
           text="SELL", textcolor=colorSignalSell)
 
 // Setup combo + grade label near signal bars
+float atrVal = ta.atr(14)
 if (buySignal or sellSignal) and showSetupLabels
     string lblTxt  = comboName + " [" + activeGrade + "]"
     color  lblClr  = buySignal ? colorSignalBuy : colorSignalSell
-    float  lblY    = buySignal ? low - ta.atr(14) * 0.7 : high + ta.atr(14) * 0.7
+    float  lblY    = buySignal ? low - atrVal * 0.7 : high + atrVal * 0.7
     label.new(bar_index, lblY, lblTxt,
               color=color.new(lblClr, 80), textcolor=lblClr,
               style=buySignal ? label.style_label_up : label.style_label_down, size=size.small)
@@ -452,9 +453,10 @@ var array<line> bfLines = array.new<line>()
 
 if barstate.islast and showBroadening and array.size(s3Highs) >= 2
     // Clear previous broadening lines
-    for i = 0 to array.size(bfLines) - 1
-        line.delete(array.get(bfLines, i))
-    array.clear(bfLines)
+    if array.size(bfLines) > 0
+        for i = 0 to array.size(bfLines) - 1
+            line.delete(array.get(bfLines, i))
+        array.clear(bfLines)
 
     int cnt = array.size(s3Highs)
     for i = 1 to math.min(cnt - 1, 8)
