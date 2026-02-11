@@ -1,0 +1,661 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// TheStrat Dashboard - Comprehensive Strat Analysis Indicator
+// Based on "The Strat" methodology by @TheStrat
+// Classifies candles, detects setups, tracks HTF continuity, and generates graded signals
+
+//@version=6
+indicator("TheStrat Dashboard", shorttitle="STRAT", overlay=true,
+         max_labels_count=500, max_lines_count=500, max_boxes_count=200)
+
+// ============================================================================
+// SECTION 1: INPUTS
+// ============================================================================
+
+// --- Display Settings ---
+grpDisplay          = "Display"
+showScenarioLabels  = input.bool(true, "Show Scenario Labels (1, 2u, 2d, 3)", group=grpDisplay)
+showBarColors       = input.bool(true, "Color Bars by Scenario", group=grpDisplay)
+showSetupLabels     = input.bool(true, "Show Setup Combo Labels", group=grpDisplay)
+showBuySell         = input.bool(true, "Show Buy/Sell Signals", group=grpDisplay)
+showRiskLevels      = input.bool(true, "Show Entry / Stop / Target Lines", group=grpDisplay)
+showInsideBarLevels = input.bool(true, "Show Inside Bar Breakout Levels", group=grpDisplay)
+showBroadening      = input.bool(true, "Show Broadening Formation (S3 Levels)", group=grpDisplay)
+showHTFTable        = input.bool(true, "Show HTF Dashboard Table", group=grpDisplay)
+
+// --- Color Settings ---
+grpColors       = "Colors"
+colorBullish    = input.color(#00C853, "Bullish (2-Up)", group=grpColors)
+colorBearish    = input.color(#FF1744, "Bearish (2-Down)", group=grpColors)
+colorNeutral    = input.color(#9E9E9E, "Neutral (Inside Bar)", group=grpColors)
+colorOutside    = input.color(#FFD600, "Outside Bar (Scenario 3)", group=grpColors)
+colorSignalBuy  = input.color(#00E676, "Buy Signal", group=grpColors)
+colorSignalSell = input.color(#FF4081, "Sell Signal", group=grpColors)
+
+// --- HTF Settings ---
+grpHTF      = "Higher Timeframes"
+htfEnable1  = input.bool(true, "Yearly (12M)", group=grpHTF)
+htfEnable2  = input.bool(true, "Quarterly (3M)", group=grpHTF)
+htfEnable3  = input.bool(true, "Monthly (1M)", group=grpHTF)
+htfEnable4  = input.bool(true, "Weekly (1W)", group=grpHTF)
+htfEnable5  = input.bool(true, "Daily (1D)", group=grpHTF)
+htfEnable6  = input.bool(true, "60 Minute", group=grpHTF)
+
+// --- Signal Settings ---
+grpSignals      = "Signals"
+minTFAlign      = input.int(3, "Min TF Alignment for Signal", minval=1, maxval=6, group=grpSignals,
+                     tooltip="Minimum number of higher timeframes that must agree with the signal direction")
+showOnlyAPlus   = input.bool(false, "Show Only A+ Signals (FTFC Required)", group=grpSignals)
+
+// ============================================================================
+// SECTION 2: SCENARIO CLASSIFICATION FUNCTIONS
+// ============================================================================
+
+// Classify a bar as Scenario 1, 2, or 3 relative to the previous bar
+getScenario(float cH, float cL, float pH, float pL) =>
+    if cH > pH and cL < pL
+        3
+    else if cH <= pH and cL >= pL
+        1
+    else
+        2
+
+// Get directional string for any scenario
+getScenarioStr(float cH, float cL, float pH, float pL) =>
+    int s = getScenario(cH, cL, pH, pL)
+    if s == 1
+        "1"
+    else if s == 3
+        "3"
+    else
+        if cH > pH
+            "2u"
+        else
+            "2d"
+
+// Failed 2 detection: scenario 2 bar that closes against its breakout direction
+isFailed2U(string scenStr, float c, float o) =>
+    scenStr == "2u" and c < o
+
+isFailed2D(string scenStr, float c, float o) =>
+    scenStr == "2d" and c > o
+
+// ============================================================================
+// SECTION 3: HTF DATA RETRIEVAL
+// ============================================================================
+
+// Helper to bundle current + previous bar OHLC data
+htfOHLC() =>
+    [open, high, low, close, high[1], low[1], open[1], close[1]]
+
+// 6 request.security() calls -- one per higher timeframe
+// Each returns: [open, high, low, close, prevHigh, prevLow, prevOpen, prevClose]
+
+[y_o, y_h, y_l, y_c, y_pH, y_pL, y_pO, y_pC]  = request.security(syminfo.tickerid, "12M", htfOHLC(), lookahead=barmerge.lookahead_off)
+[q_o, q_h, q_l, q_c, q_pH, q_pL, q_pO, q_pC]  = request.security(syminfo.tickerid, "3M",  htfOHLC(), lookahead=barmerge.lookahead_off)
+[m_o, m_h, m_l, m_c, m_pH, m_pL, m_pO, m_pC]  = request.security(syminfo.tickerid, "1M",  htfOHLC(), lookahead=barmerge.lookahead_off)
+[w_o, w_h, w_l, w_c, w_pH, w_pL, w_pO, w_pC]  = request.security(syminfo.tickerid, "1W",  htfOHLC(), lookahead=barmerge.lookahead_off)
+[d_o, d_h, d_l, d_c, d_pH, d_pL, d_pO, d_pC]  = request.security(syminfo.tickerid, "1D",  htfOHLC(), lookahead=barmerge.lookahead_off)
+[h_o, h_h, h_l, h_c, h_pH, h_pL, h_pO, h_pC]  = request.security(syminfo.tickerid, "60",  htfOHLC(), lookahead=barmerge.lookahead_off)
+
+// ============================================================================
+// SECTION 4: HTF ANALYSIS
+// ============================================================================
+
+// For each HTF, compute: scenario string, bullish/bearish, whether current price is above its open
+// Yearly
+string y_scen   = htfEnable1 and not na(y_pH) ? getScenarioStr(y_h, y_l, y_pH, y_pL) : na
+bool   y_bull   = htfEnable1 and not na(y_c) ? y_c > y_o : na
+bool   y_above  = htfEnable1 and not na(y_o) ? close > y_o : na
+
+// Quarterly
+string q_scen   = htfEnable2 and not na(q_pH) ? getScenarioStr(q_h, q_l, q_pH, q_pL) : na
+bool   q_bull   = htfEnable2 and not na(q_c) ? q_c > q_o : na
+bool   q_above  = htfEnable2 and not na(q_o) ? close > q_o : na
+
+// Monthly
+string m_scen   = htfEnable3 and not na(m_pH) ? getScenarioStr(m_h, m_l, m_pH, m_pL) : na
+bool   m_bull   = htfEnable3 and not na(m_c) ? m_c > m_o : na
+bool   m_above  = htfEnable3 and not na(m_o) ? close > m_o : na
+
+// Weekly
+string w_scen   = htfEnable4 and not na(w_pH) ? getScenarioStr(w_h, w_l, w_pH, w_pL) : na
+bool   w_bull   = htfEnable4 and not na(w_c) ? w_c > w_o : na
+bool   w_above  = htfEnable4 and not na(w_o) ? close > w_o : na
+
+// Daily
+string d_scen   = htfEnable5 and not na(d_pH) ? getScenarioStr(d_h, d_l, d_pH, d_pL) : na
+bool   d_bull   = htfEnable5 and not na(d_c) ? d_c > d_o : na
+bool   d_above  = htfEnable5 and not na(d_o) ? close > d_o : na
+
+// 60 Minute
+string h_scen   = htfEnable6 and not na(h_pH) ? getScenarioStr(h_h, h_l, h_pH, h_pL) : na
+bool   h_bull   = htfEnable6 and not na(h_c) ? h_c > h_o : na
+bool   h_above  = htfEnable6 and not na(h_o) ? close > h_o : na
+
+// ============================================================================
+// SECTION 5: TIMEFRAME CONTINUITY (TFC / FTFC)
+// ============================================================================
+
+// Count bullish and bearish timeframes (using "above open" for real-time accuracy)
+int bullCount = 0
+int bearCount = 0
+int tfTotal   = 0
+
+if htfEnable1 and not na(y_above)
+    tfTotal += 1
+    if y_above
+        bullCount += 1
+    else
+        bearCount += 1
+
+if htfEnable2 and not na(q_above)
+    tfTotal += 1
+    if q_above
+        bullCount += 1
+    else
+        bearCount += 1
+
+if htfEnable3 and not na(m_above)
+    tfTotal += 1
+    if m_above
+        bullCount += 1
+    else
+        bearCount += 1
+
+if htfEnable4 and not na(w_above)
+    tfTotal += 1
+    if w_above
+        bullCount += 1
+    else
+        bearCount += 1
+
+if htfEnable5 and not na(d_above)
+    tfTotal += 1
+    if d_above
+        bullCount += 1
+    else
+        bearCount += 1
+
+if htfEnable6 and not na(h_above)
+    tfTotal += 1
+    if h_above
+        bullCount += 1
+    else
+        bearCount += 1
+
+// FTFC: 4+ timeframes aligned in same direction
+bool isFTFCBull = bullCount >= 4
+bool isFTFCBear = bearCount >= 4
+bool isFTFC     = isFTFCBull or isFTFCBear
+string ftfcBias = isFTFCBull ? "BULLISH" : isFTFCBear ? "BEARISH" : "MIXED"
+
+// Signal quality grading
+getGrade(string dir) =>
+    int aligned = dir == "bull" ? bullCount : bearCount
+    if aligned >= 4
+        "A+"
+    else if aligned >= 2
+        "B"
+    else
+        "C"
+
+// ============================================================================
+// SECTION 6: CURRENT TIMEFRAME SCENARIO CLASSIFICATION
+// ============================================================================
+
+// Current bar scenario
+string currScen     = getScenarioStr(high, low, high[1], low[1])
+int    currScenNum  = getScenario(high, low, high[1], low[1])
+bool   currBull     = close > open
+bool   currFail2U   = isFailed2U(currScen, close, open)
+bool   currFail2D   = isFailed2D(currScen, close, open)
+
+// Previous bars (needed for combo detection)
+string prevScen1    = getScenarioStr(high[1], low[1], high[2], low[2])
+int    prevScenNum1 = getScenario(high[1], low[1], high[2], low[2])
+string prevScen2    = getScenarioStr(high[2], low[2], high[3], low[3])
+int    prevScenNum2 = getScenario(high[2], low[2], high[3], low[3])
+
+// Bar coloring by scenario
+color scenBarColor = currScenNum == 1 ? colorNeutral :
+                     currScenNum == 3 ? colorOutside :
+                     currScen == "2u" ? colorBullish : colorBearish
+
+barcolor(showBarColors ? scenBarColor : na)
+
+// Scenario labels below each bar
+if showScenarioLabels
+    color scenLblColor = currScenNum == 1 ? colorNeutral :
+                         currScenNum == 3 ? colorOutside :
+                         currScen == "2u" ? colorBullish : colorBearish
+    label.new(bar_index, low - ta.atr(14) * 0.25, currScen,
+              color=color.new(color.white, 100), textcolor=scenLblColor,
+              style=label.style_label_up, size=size.tiny)
+
+// ============================================================================
+// SECTION 7: TRADE SETUP DETECTION ENGINE
+// ============================================================================
+
+// --- Inside Bar Breakout (after Scenario 1) ---
+bool prevWasInside    = prevScenNum1 == 1
+bool insideBreakLong  = prevWasInside and currScen == "2u"
+bool insideBreakShort = prevWasInside and currScen == "2d"
+
+// --- Failed 2 Signals ---
+// currFail2U = bearish reversal signal (broke high but closed bearish)
+// currFail2D = bullish reversal signal (broke low but closed bullish)
+
+// --- 2-2 Reversals ---
+bool is2u_2d = prevScen1 == "2u" and currScen == "2d"     // bearish reversal
+bool is2d_2u = prevScen1 == "2d" and currScen == "2u"     // bullish reversal
+
+// --- 3-2 Reversals ---
+bool is3_2u = prevScenNum1 == 3 and currScen == "2u"      // bullish after outside
+bool is3_2d = prevScenNum1 == 3 and currScen == "2d"      // bearish after outside
+
+// --- Inside Bar Reversals (3-bar combos) ---
+bool is2_1_2u = prevScenNum2 == 2 and prevScenNum1 == 1 and currScen == "2u"
+bool is2_1_2d = prevScenNum2 == 2 and prevScenNum1 == 1 and currScen == "2d"
+bool is3_1_2u = prevScenNum2 == 3 and prevScenNum1 == 1 and currScen == "2u"
+bool is3_1_2d = prevScenNum2 == 3 and prevScenNum1 == 1 and currScen == "2d"
+
+// --- Rev-Strat (inside bar then outside bar) ---
+bool is1_3u = prevScenNum1 == 1 and currScenNum == 3 and currBull
+bool is1_3d = prevScenNum1 == 1 and currScenNum == 3 and not currBull
+
+// --- MoMo Hammer / Shooter Continuation (3-bar) ---
+bool is3_2d_2u = prevScenNum2 == 3 and prevScen1 == "2d" and currScen == "2u"  // bullish
+bool is3_2u_2d = prevScenNum2 == 3 and prevScen1 == "2u" and currScen == "2d"  // bearish
+
+// --- Inside Bar Continuation (after inside, continues prior direction) ---
+bool is2u_1_2u = prevScen2 == "2u" and prevScenNum1 == 1 and currScen == "2u"  // bullish cont
+bool is2d_1_2d = prevScen2 == "2d" and prevScenNum1 == 1 and currScen == "2d"  // bearish cont
+
+// === Composite flags ===
+bool anyBullSetup = insideBreakLong or currFail2D or is2d_2u or is3_2u or
+                    is2_1_2u or is3_1_2u or is1_3u or is3_2d_2u or is2u_1_2u
+bool anyBearSetup = insideBreakShort or currFail2U or is2u_2d or is3_2d or
+                    is2_1_2d or is3_1_2d or is1_3d or is3_2u_2d or is2d_1_2d
+
+// Build combo name string
+string comboName = is2_1_2u   ? "2-1-2U"   : is2_1_2d   ? "2-1-2D"   :
+                   is3_1_2u   ? "3-1-2U"   : is3_1_2d   ? "3-1-2D"   :
+                   is2u_1_2u  ? "2U-1-2U"  : is2d_1_2d  ? "2D-1-2D"  :
+                   is1_3u     ? "1-3U"     : is1_3d     ? "1-3D"     :
+                   is2d_2u    ? "2D-2U"    : is2u_2d    ? "2U-2D"    :
+                   is3_2u     ? "3-2U"     : is3_2d     ? "3-2D"     :
+                   is3_2d_2u  ? "3-2D-2U"  : is3_2u_2d  ? "3-2U-2D"  :
+                   currFail2U ? "FAIL 2U"  : currFail2D ? "FAIL 2D"  :
+                   insideBreakLong ? "1-BRK UP" : insideBreakShort ? "1-BRK DN" : ""
+
+// ============================================================================
+// SECTION 8: BUY / SELL SIGNAL GENERATION
+// ============================================================================
+
+string bullGrade = getGrade("bull")
+string bearGrade = getGrade("bear")
+
+// Signal: setup + sufficient HTF alignment
+bool rawBuy  = anyBullSetup and bullCount >= minTFAlign
+bool rawSell = anyBearSetup and bearCount >= minTFAlign
+
+// Apply A+ filter if enabled
+bool buySignal  = showOnlyAPlus ? (rawBuy and isFTFCBull) : rawBuy
+bool sellSignal = showOnlyAPlus ? (rawSell and isFTFCBear) : rawSell
+
+// Determine active grade
+string activeGrade = buySignal ? bullGrade : sellSignal ? bearGrade : ""
+
+// Buy/sell arrows via plotshape (unlimited -- no label cap)
+plotshape(buySignal and showBuySell, title="BUY", location=location.belowbar,
+          color=colorSignalBuy, style=shape.triangleup, size=size.small,
+          text="BUY", textcolor=colorSignalBuy)
+
+plotshape(sellSignal and showBuySell, title="SELL", location=location.abovebar,
+          color=colorSignalSell, style=shape.triangledown, size=size.small,
+          text="SELL", textcolor=colorSignalSell)
+
+// Setup combo + grade label near signal bars
+if (buySignal or sellSignal) and showSetupLabels
+    string lblTxt  = comboName + " [" + activeGrade + "]"
+    color  lblClr  = buySignal ? colorSignalBuy : colorSignalSell
+    float  lblY    = buySignal ? low - ta.atr(14) * 0.7 : high + ta.atr(14) * 0.7
+    label.style lblStyle = buySignal ? label.style_label_up : label.style_label_down
+    label.new(bar_index, lblY, lblTxt,
+              color=color.new(lblClr, 80), textcolor=lblClr,
+              style=lblStyle, size=size.small)
+
+// ============================================================================
+// SECTION 9: RISK LEVEL VISUALIZATION
+// ============================================================================
+
+// Entry / Stop / Target for the most recent signal
+var line entryLine  = na
+var line stopLine   = na
+var line targetLine = na
+var label entryLbl  = na
+var label stopLbl   = na
+var label targetLbl = na
+
+if (buySignal or sellSignal) and showRiskLevels
+    // Clean previous lines and labels
+    if not na(entryLine)
+        line.delete(entryLine)
+    if not na(stopLine)
+        line.delete(stopLine)
+    if not na(targetLine)
+        line.delete(targetLine)
+    if not na(entryLbl)
+        label.delete(entryLbl)
+    if not na(stopLbl)
+        label.delete(stopLbl)
+    if not na(targetLbl)
+        label.delete(targetLbl)
+
+    float entryPrice  = na
+    float stopPrice   = na
+    float targetPrice = na
+
+    if buySignal
+        entryPrice  := high
+        stopPrice   := low
+        // Target: previous bar's high or previous inside bar high
+        targetPrice := high[1]
+
+    if sellSignal
+        entryPrice  := low
+        stopPrice   := high
+        targetPrice := low[1]
+
+    // Draw lines extending forward
+    int extLen = 15
+    entryLine  := line.new(bar_index, entryPrice, bar_index + extLen, entryPrice,
+                           color=color.white, style=line.style_solid, width=2)
+    stopLine   := line.new(bar_index, stopPrice, bar_index + extLen, stopPrice,
+                           color=colorBearish, style=line.style_dashed, width=1)
+    targetLine := line.new(bar_index, targetPrice, bar_index + extLen, targetPrice,
+                           color=colorBullish, style=line.style_dotted, width=1)
+
+    // Price labels
+    entryLbl  := label.new(bar_index + extLen + 1, entryPrice,
+                           "ENTRY " + str.tostring(entryPrice, format.mintick),
+                           color=color.new(color.white, 85), textcolor=color.white,
+                           style=label.style_label_left, size=size.tiny)
+    stopLbl   := label.new(bar_index + extLen + 1, stopPrice,
+                           "STOP " + str.tostring(stopPrice, format.mintick),
+                           color=color.new(colorBearish, 85), textcolor=colorBearish,
+                           style=label.style_label_left, size=size.tiny)
+    targetLbl := label.new(bar_index + extLen + 1, targetPrice,
+                           "TARGET " + str.tostring(targetPrice, format.mintick),
+                           color=color.new(colorBullish, 85), textcolor=colorBullish,
+                           style=label.style_label_left, size=size.tiny)
+
+// --- Inside Bar Breakout Levels ---
+var line ibHighLine = na
+var line ibLowLine  = na
+var label ibHighLbl = na
+var label ibLowLbl  = na
+
+if currScenNum == 1 and showInsideBarLevels
+    // Clean previous
+    if not na(ibHighLine)
+        line.delete(ibHighLine)
+    if not na(ibLowLine)
+        line.delete(ibLowLine)
+    if not na(ibHighLbl)
+        label.delete(ibHighLbl)
+    if not na(ibLowLbl)
+        label.delete(ibLowLbl)
+
+    int ibExt = 20
+    ibHighLine := line.new(bar_index, high, bar_index + ibExt, high,
+                           color=color.new(colorBullish, 40), style=line.style_dotted, width=1)
+    ibLowLine  := line.new(bar_index, low, bar_index + ibExt, low,
+                           color=color.new(colorBearish, 40), style=line.style_dotted, width=1)
+    ibHighLbl  := label.new(bar_index + ibExt + 1, high, "IB High",
+                            color=color.new(colorBullish, 90), textcolor=colorBullish,
+                            style=label.style_label_left, size=size.tiny)
+    ibLowLbl   := label.new(bar_index + ibExt + 1, low, "IB Low",
+                            color=color.new(colorBearish, 90), textcolor=colorBearish,
+                            style=label.style_label_left, size=size.tiny)
+
+// ============================================================================
+// SECTION 10: BROADENING FORMATION TRACKING
+// ============================================================================
+
+// Store Scenario 3 highs/lows for broadening formation visualization
+var array<float> s3Highs    = array.new<float>()
+var array<float> s3Lows     = array.new<float>()
+var array<int>   s3HighBars = array.new<int>()
+var array<int>   s3LowBars  = array.new<int>()
+
+if currScenNum == 3 and showBroadening
+    array.push(s3Highs, high)
+    array.push(s3Lows, low)
+    array.push(s3HighBars, bar_index)
+    array.push(s3LowBars, bar_index)
+
+    // Cap at 10 most recent S3 events
+    if array.size(s3Highs) > 10
+        array.shift(s3Highs)
+        array.shift(s3Lows)
+        array.shift(s3HighBars)
+        array.shift(s3LowBars)
+
+// Draw broadening formation lines on last bar (connecting S3 highs and S3 lows)
+var array<line> bfLines = array.new<line>()
+
+if barstate.islast and showBroadening and array.size(s3Highs) >= 2
+    // Clear previous broadening lines
+    for i = 0 to array.size(bfLines) - 1
+        line.delete(array.get(bfLines, i))
+    array.clear(bfLines)
+
+    int cnt = array.size(s3Highs)
+    for i = 1 to math.min(cnt - 1, 8)
+        // Connect consecutive S3 highs
+        line hl = line.new(array.get(s3HighBars, i - 1), array.get(s3Highs, i - 1),
+                           array.get(s3HighBars, i), array.get(s3Highs, i),
+                           color=color.new(colorBullish, 50), style=line.style_solid, width=1)
+        array.push(bfLines, hl)
+
+        // Connect consecutive S3 lows
+        line ll = line.new(array.get(s3LowBars, i - 1), array.get(s3Lows, i - 1),
+                           array.get(s3LowBars, i), array.get(s3Lows, i),
+                           color=color.new(colorBearish, 50), style=line.style_solid, width=1)
+        array.push(bfLines, ll)
+
+    // Mark the most recent S3 levels as key reclaim levels
+    if cnt > 0
+        int lastIdx = cnt - 1
+        float lastS3H = array.get(s3Highs, lastIdx)
+        float lastS3L = array.get(s3Lows, lastIdx)
+        int   lastBar = array.get(s3HighBars, lastIdx)
+
+        // Extend reclaim levels to the current bar
+        line reclaimHigh = line.new(lastBar, lastS3H, bar_index + 5, lastS3H,
+                                    color=color.new(colorOutside, 40), style=line.style_dashed, width=1)
+        line reclaimLow  = line.new(lastBar, lastS3L, bar_index + 5, lastS3L,
+                                    color=color.new(colorOutside, 40), style=line.style_dashed, width=1)
+        array.push(bfLines, reclaimHigh)
+        array.push(bfLines, reclaimLow)
+
+        label.new(bar_index + 6, lastS3H, "S3 HIGH",
+                  color=color.new(colorOutside, 85), textcolor=colorOutside,
+                  style=label.style_label_left, size=size.tiny)
+        label.new(bar_index + 6, lastS3L, "S3 LOW",
+                  color=color.new(colorOutside, 85), textcolor=colorOutside,
+                  style=label.style_label_left, size=size.tiny)
+
+// ============================================================================
+// SECTION 11: HTF DASHBOARD TABLE
+// ============================================================================
+
+var table htfTable = na
+
+if showHTFTable
+    if barstate.isfirst
+        htfTable := table.new(position.top_right, 6, 9,
+                              bgcolor=color.new(#1A1A2E, 0),
+                              border_color=color.new(#333355, 0),
+                              border_width=1,
+                              frame_color=color.new(#444477, 0),
+                              frame_width=2)
+
+    if barstate.islast and not na(htfTable)
+        // === Header Row ===
+        color hdrBg = color.new(#2A2A4E, 0)
+        table.cell(htfTable, 0, 0, "TF",       text_color=color.white, text_size=size.small, bgcolor=hdrBg, text_halign=text.align_center)
+        table.cell(htfTable, 1, 0, "SCEN",     text_color=color.white, text_size=size.small, bgcolor=hdrBg, text_halign=text.align_center)
+        table.cell(htfTable, 2, 0, "BIAS",     text_color=color.white, text_size=size.small, bgcolor=hdrBg, text_halign=text.align_center)
+        table.cell(htfTable, 3, 0, "vs OPEN",  text_color=color.white, text_size=size.small, bgcolor=hdrBg, text_halign=text.align_center)
+        table.cell(htfTable, 4, 0, "OPEN $",   text_color=color.white, text_size=size.small, bgcolor=hdrBg, text_halign=text.align_center)
+        table.cell(htfTable, 5, 0, "STATUS",   text_color=color.white, text_size=size.small, bgcolor=hdrBg, text_halign=text.align_center)
+
+        // Helper arrays for iteration
+        array<string> tfNames    = array.from("12M", "3M", "1M", "1W", "1D", "60m")
+        array<string> tfLabels   = array.from("YEARLY", "QTR", "MONTH", "WEEK", "DAILY", "60MIN")
+        array<bool>   tfEnabled  = array.from(htfEnable1, htfEnable2, htfEnable3, htfEnable4, htfEnable5, htfEnable6)
+        array<string> tfScens    = array.from(na(y_scen) ? "-" : y_scen, na(q_scen) ? "-" : q_scen,
+                                              na(m_scen) ? "-" : m_scen, na(w_scen) ? "-" : w_scen,
+                                              na(d_scen) ? "-" : d_scen, na(h_scen) ? "-" : h_scen)
+
+        array<bool>   tfBulls    = array.from(na(y_bull) ? false : y_bull, na(q_bull) ? false : q_bull,
+                                              na(m_bull) ? false : m_bull, na(w_bull) ? false : w_bull,
+                                              na(d_bull) ? false : d_bull, na(h_bull) ? false : h_bull)
+
+        array<bool>   tfAbove    = array.from(na(y_above) ? false : y_above, na(q_above) ? false : q_above,
+                                              na(m_above) ? false : m_above, na(w_above) ? false : w_above,
+                                              na(d_above) ? false : d_above, na(h_above) ? false : h_above)
+
+        array<float>  tfOpens    = array.from(nz(y_o), nz(q_o), nz(m_o), nz(w_o), nz(d_o), nz(h_o))
+        array<bool>   tfDataOk   = array.from(not na(y_scen), not na(q_scen), not na(m_scen),
+                                              not na(w_scen), not na(d_scen), not na(h_scen))
+
+        for i = 0 to 5
+            int row = i + 1
+            bool enabled = array.get(tfEnabled, i)
+            bool hasData = array.get(tfDataOk, i)
+
+            if enabled and hasData
+                string scen    = array.get(tfScens, i)
+                bool   bull    = array.get(tfBulls, i)
+                bool   above   = array.get(tfAbove, i)
+                float  openP   = array.get(tfOpens, i)
+                color  biasClr = bull ? colorBullish : colorBearish
+                color  abvClr  = above ? colorBullish : colorBearish
+                color  rowBg   = color.new(biasClr, 90)
+
+                table.cell(htfTable, 0, row, array.get(tfLabels, i),
+                           text_color=color.white, text_size=size.small, bgcolor=rowBg, text_halign=text.align_center)
+                table.cell(htfTable, 1, row, scen,
+                           text_color=biasClr, text_size=size.small, bgcolor=rowBg, text_halign=text.align_center)
+                table.cell(htfTable, 2, row, bull ? "BULL" : "BEAR",
+                           text_color=biasClr, text_size=size.small, bgcolor=color.new(biasClr, 80), text_halign=text.align_center)
+                table.cell(htfTable, 3, row, above ? "ABOVE" : "BELOW",
+                           text_color=abvClr, text_size=size.small, bgcolor=rowBg, text_halign=text.align_center)
+                table.cell(htfTable, 4, row, str.tostring(openP, format.mintick),
+                           text_color=color.new(color.white, 30), text_size=size.tiny, bgcolor=rowBg, text_halign=text.align_center)
+                table.cell(htfTable, 5, row, above and bull ? "GO" : "WAIT",
+                           text_color=above and bull ? colorBullish : above == false and bull == false ? colorBearish : colorNeutral,
+                           text_size=size.small, bgcolor=rowBg, text_halign=text.align_center)
+            else
+                color offBg = color.new(#1A1A2E, 0)
+                table.cell(htfTable, 0, row, enabled ? array.get(tfLabels, i) : array.get(tfLabels, i),
+                           text_color=color.gray, text_size=size.small, bgcolor=offBg, text_halign=text.align_center)
+                for j = 1 to 5
+                    table.cell(htfTable, j, row, enabled ? "N/A" : "OFF",
+                               text_color=color.gray, text_size=size.tiny, bgcolor=offBg, text_halign=text.align_center)
+
+        // === FTFC Summary Row (row 7) ===
+        color ftfcColor = isFTFCBull ? colorBullish : isFTFCBear ? colorBearish : colorNeutral
+        color ftfcBg    = color.new(ftfcColor, 70)
+        string ftfcText = isFTFC ? "FTFC " + ftfcBias : "NO FTFC"
+        string countTxt = str.tostring(bullCount) + " Bull / " + str.tostring(bearCount) + " Bear"
+
+        table.cell(htfTable, 0, 7, "FTFC",  text_color=color.white, text_size=size.small, bgcolor=ftfcBg, text_halign=text.align_center)
+        table.cell(htfTable, 1, 7, ftfcText, text_color=ftfcColor, text_size=size.small, bgcolor=ftfcBg, text_halign=text.align_center)
+        table.cell(htfTable, 2, 7, countTxt, text_color=color.white, text_size=size.tiny, bgcolor=ftfcBg, text_halign=text.align_center)
+        table.cell(htfTable, 3, 7, "",       text_color=color.white, text_size=size.tiny, bgcolor=ftfcBg, text_halign=text.align_center)
+        table.cell(htfTable, 4, 7, "",       text_color=color.white, text_size=size.tiny, bgcolor=ftfcBg, text_halign=text.align_center)
+        table.cell(htfTable, 5, 7, "",       text_color=color.white, text_size=size.tiny, bgcolor=ftfcBg, text_halign=text.align_center)
+
+        // === Current Bar Info Row (row 8) ===
+        string currInfo = "Current: " + currScen + (currFail2U ? " (FAIL 2U)" : currFail2D ? " (FAIL 2D)" : "")
+        color currBg = color.new(currBull ? colorBullish : colorBearish, 80)
+        table.cell(htfTable, 0, 8, "NOW",      text_color=color.white, text_size=size.small, bgcolor=currBg, text_halign=text.align_center)
+        table.cell(htfTable, 1, 8, currInfo,    text_color=color.white, text_size=size.small, bgcolor=currBg, text_halign=text.align_center)
+        table.cell(htfTable, 2, 8, comboName != "" ? comboName : "---", text_color=colorOutside, text_size=size.small, bgcolor=currBg, text_halign=text.align_center)
+        table.cell(htfTable, 3, 8, activeGrade != "" ? activeGrade : "---", text_color=color.white, text_size=size.small, bgcolor=currBg, text_halign=text.align_center)
+        table.cell(htfTable, 4, 8, "", bgcolor=currBg)
+        table.cell(htfTable, 5, 8, "", bgcolor=currBg)
+
+// ============================================================================
+// SECTION 12: HTF OPEN PRICE LEVELS ON CHART
+// ============================================================================
+
+// Plot key HTF opens as horizontal reference lines
+plot(htfEnable3 and not na(m_o) ? m_o : na, "Monthly Open", color=color.new(#2196F3, 60),
+     style=plot.style_stepline_diamond, linewidth=1)
+plot(htfEnable4 and not na(w_o) ? w_o : na, "Weekly Open", color=color.new(#FF9800, 60),
+     style=plot.style_stepline_diamond, linewidth=1)
+plot(htfEnable5 and not na(d_o) ? d_o : na, "Daily Open", color=color.new(#E040FB, 60),
+     style=plot.style_stepline_diamond, linewidth=1)
+
+// ============================================================================
+// SECTION 13: ALERT CONDITIONS
+// ============================================================================
+
+// Use alert() for dynamic messages (supports series strings)
+if buySignal
+    alert("STRAT BUY | " + syminfo.ticker + " " + timeframe.period +
+          " | Setup: " + comboName + " [" + activeGrade + "]" +
+          " | Entry: " + str.tostring(high, format.mintick) +
+          " | Stop: " + str.tostring(low, format.mintick) +
+          " | TF Alignment: " + str.tostring(bullCount) + "/" + str.tostring(tfTotal) + " Bullish" +
+          (isFTFCBull ? " | FTFC BULLISH" : ""),
+          alert.freq_once_per_bar)
+
+if sellSignal
+    alert("STRAT SELL | " + syminfo.ticker + " " + timeframe.period +
+          " | Setup: " + comboName + " [" + activeGrade + "]" +
+          " | Entry: " + str.tostring(low, format.mintick) +
+          " | Stop: " + str.tostring(high, format.mintick) +
+          " | TF Alignment: " + str.tostring(bearCount) + "/" + str.tostring(tfTotal) + " Bearish" +
+          (isFTFCBear ? " | FTFC BEARISH" : ""),
+          alert.freq_once_per_bar)
+
+if currScenNum == 1
+    alert("INSIDE BAR | " + syminfo.ticker + " " + timeframe.period +
+          " | High: " + str.tostring(high, format.mintick) +
+          " | Low: " + str.tostring(low, format.mintick) +
+          " | Watch for breakout",
+          alert.freq_once_per_bar)
+
+if currFail2U or currFail2D
+    alert("FAILED 2 | " + syminfo.ticker + " " + timeframe.period +
+          " | " + (currFail2U ? "Failed 2U (Bearish Signal)" : "Failed 2D (Bullish Signal)") +
+          " | Close: " + str.tostring(close, format.mintick),
+          alert.freq_once_per_bar)
+
+// Static alertcondition() entries for TradingView alert dialog
+alertcondition(buySignal, "Strat BUY", "Strat BUY signal triggered")
+alertcondition(sellSignal, "Strat SELL", "Strat SELL signal triggered")
+alertcondition(buySignal and isFTFCBull, "Strat A+ BUY", "A+ BUY: Full Timeframe Continuity Bullish")
+alertcondition(sellSignal and isFTFCBear, "Strat A+ SELL", "A+ SELL: Full Timeframe Continuity Bearish")
+alertcondition(currScenNum == 1, "Inside Bar", "Inside bar formed -- watch for breakout")
+alertcondition(currFail2U or currFail2D, "Failed 2", "Failed 2 detected -- reversal signal")
+
+// ============================================================================
+// SECTION 14: DATA WINDOW PLOTS (hidden from chart)
+// ============================================================================
+
+plot(currScenNum, "Scenario #", display=display.data_window, color=color.new(color.white, 100))
+plot(bullCount, "Bull TF Count", display=display.data_window, color=color.new(color.white, 100))
+plot(bearCount, "Bear TF Count", display=display.data_window, color=color.new(color.white, 100))
+plot(buySignal ? 1 : sellSignal ? -1 : 0, "Signal (1=Buy, -1=Sell)", display=display.data_window, color=color.new(color.white, 100))
+plot(isFTFC ? (isFTFCBull ? 1 : -1) : 0, "FTFC (1=Bull, -1=Bear)", display=display.data_window, color=color.new(color.white, 100))
+
+// ============================================================================
+// END OF SCRIPT
+// ============================================================================
